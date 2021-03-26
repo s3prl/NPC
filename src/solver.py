@@ -65,15 +65,15 @@ class BaseSolver():
             loss - the loss to perform loss.backward()
         '''
         self.timer.set()
-        loss.backward()
-        grad_norm = torch.nn.utils.clip_grad_norm_(
-            self.model.parameters(), self.GRAD_CLIP)
-        if math.isnan(grad_norm):
-            self.verbose('Error : grad norm is NaN @ step '+str(self.step))
-        else:
-            self.optimizer.step()
+        # loss.backward()
+        # grad_norm = torch.nn.utils.clip_grad_norm_(
+        #     self.model.parameters(), self.GRAD_CLIP)
+        # if math.isnan(grad_norm):
+        #     self.verbose('Error : grad norm is NaN @ step '+str(self.step))
+        # else:
+        #     self.optimizer.step()
         self.timer.cnt('bw')
-        return grad_norm
+        return 0
 
     def load_ckpt(self):
         ''' Load ckpt if --load option is specified '''

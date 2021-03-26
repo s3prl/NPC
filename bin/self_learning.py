@@ -83,24 +83,71 @@ class Solver(BaseSolver):
                 self.optimizer.pre_step(self.step)
                 
                 # Fetch data
-                _, audio_feat, audio_len = self.fetch_data(data)
+                fileids, audio_feat, audio_len = self.fetch_data(data)
                 self.timer.cnt('rd')
 
-                # Forward real data
-                if 'npc' in self.method:
-                    # NPC: input = target
-                    pred, _ = self.model(audio_feat)
-                    loss = self.loss(pred, audio_feat)
-                    # Compute loss on valid part only
-                    effective_loss = 0
-                    for i,a_len in enumerate(audio_len):
-                        effective_loss += loss[i,:a_len,:].mean(dim=-1).sum()
-                    loss = effective_loss/sum(audio_len)
-                else:
-                    # APC: input = shifted target
-                    audio_len = [l-self.n_future for l in audio_len]
-                    pred, _ = self.model(audio_feat[:,:-self.n_future,:], audio_len, testing=False)
-                    loss = self.loss(pred, audio_feat[:,self.n_future:,:])
+                with torch.no_grad():
+                    self.model.eval()
+
+                    # Please set s3prl into PYTHONPATH
+                    import hubconf
+                    import torchaudio
+                    from torch.nn.utils.rnn import pad_sequence
+                    torchaudio.set_audio_backend('sox_io')
+
+                    # Forward real data
+                    if 'npc' in self.method:
+                        model_name = 'npc'
+                        wavs = [torchaudio.load(fileid)[0].view(-1).cuda() for fileid in fileids]
+                        s3prl = getattr(hubconf, model_name)(feature_selection='masked').cuda()
+                        s3prl.eval()
+                        repre_s3prl = pad_sequence(s3prl(wavs), batch_first=True)
+
+                        # NPC: input = target
+                        pred, repre_origin = self.model(audio_feat, testing=True)
+                        repre_origin = pad_sequence([r[:l] for r, l in zip(repre_origin, audio_len)], batch_first=True)
+
+                        print(f'[Masked] - Max different between official and s3prl: {(repre_s3prl - repre_origin).abs().max().item()}')
+
+                        model_name = 'npc'
+                        wavs = [torchaudio.load(fileid)[0].view(-1).cuda() for fileid in fileids]
+                        s3prl = getattr(hubconf, model_name)(feature_selection='unmasked-3').cuda()
+                        s3prl.eval()
+                        repre_s3prl = pad_sequence(s3prl(wavs), batch_first=True)
+
+                        # NPC: input = target
+                        repre_origin = self.model.get_unmasked_feat(audio_feat, 3)
+                        repre_origin = pad_sequence([r[:l] for r, l in zip(repre_origin, audio_len)], batch_first=True)
+
+                        print(f'[Unmasked-3] - Max different between official and s3prl: {(repre_s3prl - repre_origin).abs().max().item()}')
+                        exit(0)
+
+                        loss = self.loss(pred, audio_feat)
+                        # Compute loss on valid part only
+                        effective_loss = 0
+                        for i,a_len in enumerate(audio_len):
+                            effective_loss += loss[i,:a_len,:].mean(dim=-1).sum()
+                        loss = effective_loss/sum(audio_len)
+                    else:
+                        if self.method == 'apc':
+                            model_name = 'apc'
+                        elif self.method == 'vqapc':
+                            model_name = 'vq_apc'
+
+                        wavs = [torchaudio.load(fileid)[0].view(-1).cuda() for fileid in fileids]
+                        s3prl = getattr(hubconf, model_name)().cuda()
+                        s3prl.eval()
+                        repre_s3prl = pad_sequence(s3prl(wavs), batch_first=True)
+
+                        # APC: input = shifted target
+                        pred, repre_origin = self.model(audio_feat, audio_len, testing=True)
+                        repre_origin = pad_sequence([r[:l] for r, l in zip(repre_origin, audio_len)], batch_first=True)
+
+                        print(f'Max different between official and s3prl: {(repre_s3prl - repre_origin).abs().max().item()}')
+                        exit(0)
+
+                        loss = self.loss(pred, audio_feat[:,self.n_future:,:])
+                
                 self.timer.cnt('fw')
                 # Backprop
                 grad_norm = self.backward(loss)

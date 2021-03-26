@@ -33,9 +33,9 @@ def collect_batch(batch, audio_transform, audio_max_frames, mode):
             file_id.append(f_path)
             # Audio feature (sequence) on-the-fly
             y = audio_transform(filepath=f_path)
-            if mode=='train':
-                # Crop to avoid OOM
-                y = _crop(y,audio_max_frames)
+            # if mode=='train':
+            #     # Crop to avoid OOM
+            #     y = _crop(y,audio_max_frames)
             audio_feat.append(y)
             audio_len.append(len(y))
         # Descending audio length within each batch
